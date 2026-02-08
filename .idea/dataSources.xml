@@ -8,5 +8,12 @@
       <jdbc-url>jdbc:postgresql://hyper-markhor-11748.jxf.gcp-europe-west3.cockroachlabs.cloud:26257/defaultdb</jdbc-url>
       <working-dir>$ProjectFileDir$</working-dir>
     </data-source>
+    <data-source source="LOCAL" name="baza-nova" uuid="75aaefda-deeb-4327-a5af-ccb17f2a2e69">
+      <driver-ref>cockroach</driver-ref>
+      <synchronize>true</synchronize>
+      <jdbc-driver>org.postgresql.Driver</jdbc-driver>
+      <jdbc-url>jdbc:postgresql://polar-chum-21210.j77.aws-eu-central-1.cockroachlabs.cloud:26257/defaultdb</jdbc-url>
+      <working-dir>$ProjectFileDir$</working-dir>
+    </data-source>
   </component>
 </project>

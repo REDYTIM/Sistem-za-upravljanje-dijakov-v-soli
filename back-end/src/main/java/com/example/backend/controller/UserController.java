@@ -8,7 +8,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/users")
-@CrossOrigin(origins = "http://localhost:3000") // frontend URL
+@CrossOrigin(origins = "http://localhost:3000")
 public class UserController {
 
     private final UserService userService;
@@ -17,33 +17,26 @@ public class UserController {
         this.userService = userService;
     }
 
-    // READ (all)
     @GetMapping
     public List<User> getUsers() {
         return userService.getAllUsers();
     }
 
-    // READ (one)
     @GetMapping("/{id}")
     public User getUser(@PathVariable Long id) {
         return userService.getUserById(id);
     }
 
-    // CREATE
     @PostMapping
     public User createUser(@RequestBody User user) {
         return userService.createUser(user);
     }
 
-    // UPDATE
     @PutMapping("/{id}")
-    public User updateUser(
-            @PathVariable Long id,
-            @RequestBody User user) {
+    public User updateUser(@PathVariable Long id, @RequestBody User user) {
         return userService.updateUser(id, user);
     }
 
-    // DELETE
     @DeleteMapping("/{id}")
     public void deleteUser(@PathVariable Long id) {
         userService.deleteUser(id);
