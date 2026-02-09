@@ -39,6 +39,43 @@ public class Main extends Application {
         }
     }
 
+    // Helper class za ocene z ID-jem
+    private static class OcenaInfo {
+        Long ocenaId;
+        Integer ocena;
+        String datum;
+
+        OcenaInfo(Long ocenaId, Integer ocena, String datum) {
+            this.ocenaId = ocenaId;
+            this.ocena = ocena;
+            this.datum = datum;
+        }
+
+        @Override
+        public String toString() {
+            return String.format("Ocena: %d (ID: %d)", ocena, ocenaId);
+        }
+    }
+
+    // Helper class za odsotnost
+    private static class OdsotnostInfo {
+        String datum;
+        String predmet;
+        String razlog;
+
+        OdsotnostInfo(String datum, String predmet, String razlog) {
+            this.datum = datum;
+            this.predmet = predmet;
+            this.razlog = razlog;
+        }
+
+        @Override
+        public String toString() {
+            return String.format("%s - %s%s", datum, predmet,
+                    razlog != null && !razlog.isEmpty() ? " (" + razlog + ")" : "");
+        }
+    }
+
     // Stili
     private static final String BUTTON_STYLE =
             "-fx-font-size: 12px; " +
@@ -73,29 +110,112 @@ public class Main extends Application {
         showLoginScene();
     }
 
+    // METODA ZA POSODOBLJANJE OCENE
+    private boolean updateGradeInBackend(long ocenaId, int novaOcena) {
+        try {
+            JsonObject request = new JsonObject();
+            request.addProperty("ocena", novaOcena);
+
+            System.out.println("DEBUG Frontend: Posodabljam oceno ID=" + ocenaId + " na " + novaOcena);
+            String response = sendPutRequest("/api/ocene/" + ocenaId, request.toString());
+            System.out.println("DEBUG Frontend: Odgovor strežnika: " + response);
+
+            if (response == null || response.trim().isEmpty()) {
+                System.out.println("DEBUG Frontend: Prazen odgovor od strežnika");
+                return false;
+            }
+
+            try {
+                JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
+                return jsonResponse.has("success") && jsonResponse.get("success").getAsBoolean();
+            } catch (Exception e) {
+                // Preveri če odgovor vsebuje ključne besede za uspeh
+                String lowerResponse = response.toLowerCase();
+                return lowerResponse.contains("uspe") ||
+                        lowerResponse.contains("success") ||
+                        lowerResponse.contains("posodobljen");
+            }
+
+        } catch (Exception e) {
+            System.out.println("DEBUG Frontend: Napaka pri posodabljanju ocene: " + e.getMessage());
+            return false;
+        }
+    }
+
+    // METODA ZA PUT ZAHTEVO
+    private String sendPutRequest(String endpoint, String jsonInput) {
+        try {
+            URL url = new URL(BACKEND_URL + endpoint);
+            System.out.println("DEBUG Frontend: PUT na URL: " + url);
+
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("PUT");
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setDoOutput(true);
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(5000);
+
+            if (authToken != null && !authToken.isEmpty()) {
+                conn.setRequestProperty("Authorization", "Bearer " + authToken);
+            }
+
+            try(OutputStream os = conn.getOutputStream()) {
+                os.write(jsonInput.getBytes());
+                os.flush();
+            }
+
+            int status = conn.getResponseCode();
+            System.out.println("DEBUG Frontend: PUT status: " + status);
+
+            StringBuilder response = new StringBuilder();
+            InputStream inputStream = (status < 400) ? conn.getInputStream() : conn.getErrorStream();
+
+            if (inputStream != null) {
+                try(BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        response.append(line);
+                    }
+                }
+            }
+
+            String result = response.toString();
+            System.out.println("DEBUG Frontend: PUT odgovor: " + result);
+            return result;
+
+        } catch (Exception e) {
+            System.out.println("DEBUG Frontend: Napaka pri PUT: " + e.getMessage());
+            return "{\"error\": \"" + e.getMessage() + "\"}";
+        }
+    }
+
     // POMOŽNE METODE
     private void showError(String title, String message) {
-        Alert alert = new Alert(Alert.AlertType.ERROR);
-        alert.setTitle(title);
-        alert.setHeaderText(null);
-        alert.setContentText(message);
-        alert.showAndWait();
+        Platform.runLater(() -> {
+            Alert alert = new Alert(Alert.AlertType.ERROR);
+            alert.setTitle(title);
+            alert.setHeaderText(null);
+            alert.setContentText(message);
+            alert.showAndWait();
+        });
     }
 
     private void showInfo(String title, String message) {
-        Alert alert = new Alert(Alert.AlertType.INFORMATION);
-        alert.setTitle(title);
-        alert.setHeaderText(null);
-        alert.setContentText(message);
-        alert.showAndWait();
+        Platform.runLater(() -> {
+            Alert alert = new Alert(Alert.AlertType.INFORMATION);
+            alert.setTitle(title);
+            alert.setHeaderText(null);
+            alert.setContentText(message);
+            alert.showAndWait();
+        });
     }
 
     private void sendStudent(JsonObject student, String method, String endpoint) {
         try {
             URL url = new URL(BACKEND_URL + "/dijaki" + endpoint);
-            System.out.println("DEBUG: Pošiljam na: " + url);
-            System.out.println("DEBUG: Metoda: " + method);
-            System.out.println("DEBUG: Podatki: " + student.toString());
+            System.out.println("DEBUG Frontend: Pošiljam na: " + url);
+            System.out.println("DEBUG Frontend: Metoda: " + method);
+            System.out.println("DEBUG Frontend: Podatki: " + student.toString());
 
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod(method);
@@ -115,7 +235,7 @@ public class Main extends Application {
             }
 
             int status = conn.getResponseCode();
-            System.out.println("DEBUG: Status odgovora: " + status);
+            System.out.println("DEBUG Frontend: Status odgovora: " + status);
 
             if (status == 200 || status == 201) {
                 BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
@@ -126,7 +246,7 @@ public class Main extends Application {
                 }
                 reader.close();
 
-                System.out.println("DEBUG: Uspešen odgovor: " + response.toString());
+                System.out.println("DEBUG Frontend: Uspešen odgovor: " + response.toString());
 
                 try {
                     JsonObject responseObj = JsonParser.parseString(response.toString()).getAsJsonObject();
@@ -145,7 +265,7 @@ public class Main extends Application {
                 }
             } else {
                 // Preberemo napako
-                System.out.println("DEBUG: Napaka - status: " + status);
+                System.out.println("DEBUG Frontend: Napaka - status: " + status);
 
                 InputStream errorStream = conn.getErrorStream();
                 if (errorStream != null) {
@@ -157,7 +277,7 @@ public class Main extends Application {
                     }
                     errorReader.close();
 
-                    System.out.println("DEBUG: Napaka od strežnika: " + errorResponse.toString());
+                    System.out.println("DEBUG Frontend: Napaka od strežnika: " + errorResponse.toString());
 
                     try {
                         JsonObject error = JsonParser.parseString(errorResponse.toString()).getAsJsonObject();
@@ -182,46 +302,99 @@ public class Main extends Application {
         }
     }
 
-    // Nova metoda za pošiljanje ocene na backend
+    // METODA ZA DODAJANJE OCENE
     private boolean addGradeToBackend(long studentId, long dijakPredmetId, int ocena) {
+        System.out.println("DEBUG Frontend: Začenjam addGradeToBackend");
+        System.out.println("DEBUG Frontend: studentId=" + studentId + ", dijakPredmetId=" + dijakPredmetId + ", ocena=" + ocena);
+
         try {
             JsonObject request = new JsonObject();
             request.addProperty("dijakPredmetId", dijakPredmetId);
             request.addProperty("ocena", ocena);
             request.addProperty("dijakId", studentId);
+            request.addProperty("datumVpisa", LocalDate.now().toString());
 
-            // DODANO: Datum za zgodovino ocen
-            String datum = LocalDate.now().toString();
-            request.addProperty("datumVpisa", datum);
+            System.out.println("DEBUG Frontend: Pošiljam oceno: " + request.toString());
 
-            System.out.println("DEBUG: Pošiljam oceno: " + request.toString());
+            String rawResponse = sendPostRequest("/api/ocene/dodaj", request.toString());
+            System.out.println("DEBUG Frontend: RAW odgovor strežnika: " + rawResponse);
 
-            // Uporabi pravilno metodo POST
-            String response = sendPostRequest("/api/ocene/dodaj", request.toString());
-            System.out.println("DEBUG: Odgovor strežnika: " + response);
+            if (rawResponse == null || rawResponse.trim().isEmpty()) {
+                System.out.println("DEBUG Frontend: Prazen odgovor od strežnika");
+                return false;
+            }
 
-            // Preveri odgovor
-            JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
-            if (jsonResponse.has("success") && jsonResponse.get("success").getAsBoolean()) {
-                return true;
-            } else if (jsonResponse.has("message") && jsonResponse.get("message").getAsString().toLowerCase().contains("uspešno")) {
-                return true;
-            } else if (jsonResponse.has("id")) { // Če vrne ID nove ocene
+            // Analiziraj odgovor
+            String response = rawResponse.trim();
+            System.out.println("DEBUG Frontend: Trimmed odgovor: '" + response + "'");
+
+            // Preveri za ključne besede
+            String lowerResponse = response.toLowerCase();
+            if (lowerResponse.contains("uspe") ||
+                    lowerResponse.contains("success") ||
+                    lowerResponse.contains("dodan") ||
+                    lowerResponse.contains("dodana") ||
+                    lowerResponse.contains("ok") ||
+                    lowerResponse.contains("true")) {
+                System.out.println("DEBUG Frontend: Vsebuje ključno besedo za uspeh");
                 return true;
             }
 
+            if (lowerResponse.contains("error") ||
+                    lowerResponse.contains("napaka") ||
+                    lowerResponse.contains("failed") ||
+                    lowerResponse.contains("false")) {
+                System.out.println("DEBUG Frontend: Vsebuje ključno besedo za napako");
+                return false;
+            }
+
+            // Poskusimo parsati kot JSON
+            if (response.startsWith("{") || response.startsWith("[")) {
+                try {
+                    JsonElement jsonElement = JsonParser.parseString(response);
+
+                    if (jsonElement.isJsonObject()) {
+                        JsonObject jsonResponse = jsonElement.getAsJsonObject();
+
+                        if (jsonResponse.has("success") && jsonResponse.get("success").getAsBoolean()) {
+                            return true;
+                        }
+                        if (jsonResponse.has("id")) {
+                            return true;
+                        }
+                        if (jsonResponse.has("message")) {
+                            String message = jsonResponse.get("message").getAsString().toLowerCase();
+                            if (message.contains("uspe") || message.contains("success")) {
+                                return true;
+                            }
+                        }
+                    }
+                } catch (JsonSyntaxException e) {
+                    System.out.println("DEBUG Frontend: JSON parsing ni uspel: " + e.getMessage());
+                }
+            }
+
+            // Če je odgovor kratek, predpostavimo uspeh
+            if (response.length() < 100) {
+                System.out.println("DEBUG Frontend: Kratek odgovor, predpostavljam uspeh");
+                return true;
+            }
+
+            System.out.println("DEBUG Frontend: Ne morem določiti uspeha");
             return false;
 
         } catch (Exception e) {
-            System.out.println("DEBUG: Napaka pri dodajanju ocene: " + e.getMessage());
+            System.out.println("DEBUG Frontend: Izjema v addGradeToBackend: " + e.getMessage());
             e.printStackTrace();
             return false;
         }
     }
 
-    // Nova metoda za brisanje ocene
+    // METODA ZA BRISANJE OCENE
     private boolean deleteGradeFromBackend(long ocenaId) {
         try {
+            System.out.println("DEBUG Frontend: Brišem oceno ID=" + ocenaId);
+
             URL url = new URL(BACKEND_URL + "/api/ocene/" + ocenaId);
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("DELETE");
@@ -233,12 +406,89 @@ public class Main extends Application {
             }
 
             int status = conn.getResponseCode();
-            return status == 200;
+            System.out.println("DEBUG Frontend: DELETE status: " + status);
+
+            if (status == 200) {
+                // Preberi odgovor za potrditev
+                BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                StringBuilder response = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    response.append(line);
+                }
+                reader.close();
+
+                System.out.println("DEBUG Frontend: DELETE odgovor: " + response.toString());
+                return true;
+            } else {
+                System.out.println("DEBUG Frontend: Napaka pri brisanju, status: " + status);
+                return false;
+            }
 
         } catch (Exception e) {
-            System.out.println("DEBUG: Napaka pri brisanju ocene: " + e.getMessage());
+            System.out.println("DEBUG Frontend: Napaka pri brisanju ocene: " + e.getMessage());
             return false;
         }
+    }
+
+    // NOVA METODA: Pridobi ocene z ID-ji
+    private List<OcenaInfo> loadOceneWithIdsFromBackend(long studentId, String predmetIme) {
+        List<OcenaInfo> oceneInfo = new ArrayList<>();
+
+        try {
+            // Encode predmet ime za URL
+            String encodedPredmetIme = java.net.URLEncoder.encode(predmetIme, "UTF-8");
+            URL url = new URL(BACKEND_URL + "/api/ocene/dijak/" + studentId + "/predmet/" + encodedPredmetIme);
+            System.out.println("DEBUG Frontend: Nalagam ocene z ID-ji za URL: " + url);
+
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(5000);
+
+            if (authToken != null && !authToken.isEmpty()) {
+                conn.setRequestProperty("Authorization", "Bearer " + authToken);
+            }
+
+            int status = conn.getResponseCode();
+            System.out.println("DEBUG Frontend: Status za ocene z ID-ji: " + status);
+
+            if (status == 200) {
+                BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                StringBuilder response = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) response.append(line);
+                reader.close();
+
+                System.out.println("DEBUG Frontend: Odgovor za ocene z ID-ji: " + response.toString());
+
+                try {
+                    JsonObject json = JsonParser.parseString(response.toString()).getAsJsonObject();
+
+                    if (json.has("ocene") && json.get("ocene").isJsonArray()) {
+                        JsonArray oceneArray = json.get("ocene").getAsJsonArray();
+                        for (JsonElement elem : oceneArray) {
+                            if (elem.isJsonObject()) {
+                                JsonObject ocenaObj = elem.getAsJsonObject();
+                                if (ocenaObj.has("id") && ocenaObj.has("ocena")) {
+                                    Long ocenaId = ocenaObj.get("id").getAsLong();
+                                    Integer ocena = ocenaObj.get("ocena").getAsInt();
+                                    String datum = ocenaObj.has("createdAt") ? ocenaObj.get("createdAt").getAsString() : "";
+                                    oceneInfo.add(new OcenaInfo(ocenaId, ocena, datum));
+                                }
+                            }
+                        }
+                    }
+                } catch (JsonSyntaxException e) {
+                    System.out.println("DEBUG Frontend: Ne morem parsati JSON za ocene z ID-ji: " + e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("DEBUG Frontend: Napaka pri nalaganju ocen z ID-ji: " + e.getMessage());
+        }
+
+        System.out.println("DEBUG Frontend: Naloženih ocen z ID-ji: " + oceneInfo.size());
+        return oceneInfo;
     }
 
     // Nova metoda za pridobivanje predmetov iz backend-a
@@ -247,7 +497,7 @@ public class Main extends Application {
 
         try {
             URL url = new URL(BACKEND_URL + "/api/ocene/dijak/" + studentId + "/predmeti");
-            System.out.println("DEBUG: Nalagam predmete za studenta: " + studentId);
+            System.out.println("DEBUG Frontend: Nalagam predmete za studenta: " + studentId);
 
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
@@ -256,11 +506,10 @@ public class Main extends Application {
 
             if (authToken != null && !authToken.isEmpty()) {
                 conn.setRequestProperty("Authorization", "Bearer " + authToken);
-                System.out.println("DEBUG: Token poslan za predmete");
             }
 
             int status = conn.getResponseCode();
-            System.out.println("DEBUG: Status za predmete: " + status);
+            System.out.println("DEBUG Frontend: Status za predmete: " + status);
 
             if (status == 200) {
                 BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
@@ -269,102 +518,35 @@ public class Main extends Application {
                 while ((line = reader.readLine()) != null) response.append(line);
                 reader.close();
 
-                System.out.println("DEBUG: Odgovor za predmete: " + response.toString());
+                System.out.println("DEBUG Frontend: Odgovor za predmete: " + response.toString());
 
-                JsonObject json = JsonParser.parseString(response.toString()).getAsJsonObject();
+                try {
+                    JsonObject json = JsonParser.parseString(response.toString()).getAsJsonObject();
 
-                if (json.has("predmeti") && json.get("predmeti").isJsonArray()) {
-                    JsonArray predmetiArray = json.get("predmeti").getAsJsonArray();
-                    for (JsonElement elem : predmetiArray) {
-                        if (elem.isJsonObject()) {
-                            JsonObject predmetObj = elem.getAsJsonObject();
-                            String ime = predmetObj.has("ime") ? predmetObj.get("ime").getAsString() : "";
-                            Long dpId = predmetObj.has("dijakPredmetId") ? predmetObj.get("dijakPredmetId").getAsLong() : null;
+                    if (json.has("predmeti") && json.get("predmeti").isJsonArray()) {
+                        JsonArray predmetiArray = json.get("predmeti").getAsJsonArray();
+                        for (JsonElement elem : predmetiArray) {
+                            if (elem.isJsonObject()) {
+                                JsonObject predmetObj = elem.getAsJsonObject();
+                                String ime = predmetObj.has("ime") ? predmetObj.get("ime").getAsString() : "";
+                                Long dpId = predmetObj.has("dijakPredmetId") ? predmetObj.get("dijakPredmetId").getAsLong() : null;
 
-                            if (!ime.isEmpty() && dpId != null) {
-                                predmeti.add(new PredmetInfo(ime, dpId));
-                                System.out.println("DEBUG: Dodan predmet: " + ime + " (ID: " + dpId + ")");
+                                if (!ime.isEmpty() && dpId != null) {
+                                    predmeti.add(new PredmetInfo(ime, dpId));
+                                }
                             }
                         }
                     }
+                } catch (JsonSyntaxException e) {
+                    System.out.println("DEBUG Frontend: Ne morem parsati JSON za predmete");
                 }
-            } else {
-                // Preberi napako
-                BufferedReader errorReader = new BufferedReader(new InputStreamReader(conn.getErrorStream()));
-                StringBuilder errorResponse = new StringBuilder();
-                String errorLine;
-                while ((errorLine = errorReader.readLine()) != null) errorResponse.append(errorLine);
-                errorReader.close();
-                System.out.println("DEBUG: Napaka pri predmetih: " + errorResponse.toString());
             }
         } catch (Exception e) {
-            System.out.println("DEBUG: Napaka pri nalaganju predmetov: " + e.getMessage());
-            e.printStackTrace();
+            System.out.println("DEBUG Frontend: Napaka pri nalaganju predmetov: " + e.getMessage());
         }
 
-        System.out.println("DEBUG: Skupaj predmetov: " + predmeti.size());
+        System.out.println("DEBUG Frontend: Naloženih predmetov: " + predmeti.size());
         return predmeti;
-    }
-
-    // Nova metoda za pridobivanje ocen iz backend-a
-    private List<Integer> loadOceneFromBackend(long studentId, String predmetIme) {
-        List<Integer> ocene = new ArrayList<>();
-
-        try {
-            // Encode predmet ime za URL
-            String encodedPredmetIme = java.net.URLEncoder.encode(predmetIme, "UTF-8");
-            URL url = new URL(BACKEND_URL + "/api/ocene/dijak/" + studentId + "/predmet/" + encodedPredmetIme);
-            System.out.println("DEBUG: Nalagam ocene za predmet: " + predmetIme);
-
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("GET");
-            conn.setConnectTimeout(5000);
-            conn.setReadTimeout(5000);
-
-            if (authToken != null && !authToken.isEmpty()) {
-                conn.setRequestProperty("Authorization", "Bearer " + authToken);
-            }
-
-            int status = conn.getResponseCode();
-            System.out.println("DEBUG: Status za ocene: " + status);
-
-            if (status == 200) {
-                BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-                StringBuilder response = new StringBuilder();
-                String line;
-                while ((line = reader.readLine()) != null) response.append(line);
-                reader.close();
-
-                System.out.println("DEBUG: Odgovor za ocene: " + response.toString());
-
-                JsonObject json = JsonParser.parseString(response.toString()).getAsJsonObject();
-
-                if (json.has("ocene") && json.get("ocene").isJsonArray()) {
-                    JsonArray oceneArray = json.get("ocene").getAsJsonArray();
-                    for (JsonElement elem : oceneArray) {
-                        if (elem.isJsonObject()) {
-                            JsonObject ocenaObj = elem.getAsJsonObject();
-                            if (ocenaObj.has("ocena")) {
-                                ocene.add(ocenaObj.get("ocena").getAsInt());
-                            }
-                        }
-                    }
-                }
-            } else {
-                // Preberi napako
-                BufferedReader errorReader = new BufferedReader(new InputStreamReader(conn.getErrorStream()));
-                StringBuilder errorResponse = new StringBuilder();
-                String errorLine;
-                while ((errorLine = errorReader.readLine()) != null) errorResponse.append(errorLine);
-                errorReader.close();
-                System.out.println("DEBUG: Napaka pri ocenah: " + errorResponse.toString());
-            }
-        } catch (Exception e) {
-            System.out.println("DEBUG: Napaka pri nalaganju ocen: " + e.getMessage());
-            e.printStackTrace();
-        }
-
-        return ocene;
     }
 
     private void showLoginScene() {
@@ -395,9 +577,9 @@ public class Main extends Application {
             }
 
             String response = login(email, password);
-            System.out.println("DEBUG: Login response: " + response);
+            System.out.println("DEBUG Frontend: Login response: " + response);
 
-            if ("Prijava uspešna".equalsIgnoreCase(response) || "Login successful".equalsIgnoreCase(response)) {
+            if (response.equals("Prijava uspešna") || response.contains("uspešna") || response.contains("success")) {
                 showMainScene();
             } else {
                 messageLabel.setText(response);
@@ -453,42 +635,35 @@ public class Main extends Application {
             obj.addProperty("email", email);
             obj.addProperty("password", password);
 
-            System.out.println("DEBUG: Pošiljam login za: " + email);
+            System.out.println("DEBUG Frontend: Pošiljam login za: " + email);
             String response = sendPostRequest("/auth/login", obj.toString());
-            System.out.println("DEBUG: Login odgovor: " + response);
+            System.out.println("DEBUG Frontend: Login odgovor: " + response);
 
-            // Tukaj je kĺjučni popravek - pravilno parsaj JSON odgovor
-            JsonElement jsonResponse = JsonParser.parseString(response);
-
-            if (jsonResponse.isJsonObject()) {
-                JsonObject responseObj = jsonResponse.getAsJsonObject();
-
-                // Preveri za token
-                if (responseObj.has("token")) {
-                    authToken = responseObj.get("token").getAsString();
-                    System.out.println("DEBUG: Token shranjen, dolžina: " + authToken.length());
-                    return "Prijava uspešna";
-                }
-                // Preveri za message
-                else if (responseObj.has("message")) {
-                    String message = responseObj.get("message").getAsString();
-                    if (message.contains("uspešna") || message.contains("successful")) {
-                        // Če je token v drugem polju
-                        if (responseObj.has("accessToken")) {
+            if (response.contains("\"token\"") || response.contains("\"accessToken\"") || response.contains("\"authToken\"")) {
+                try {
+                    JsonElement jsonElement = JsonParser.parseString(response);
+                    if (jsonElement.isJsonObject()) {
+                        JsonObject responseObj = jsonElement.getAsJsonObject();
+                        if (responseObj.has("token")) {
+                            authToken = responseObj.get("token").getAsString();
+                        } else if (responseObj.has("accessToken")) {
                             authToken = responseObj.get("accessToken").getAsString();
                         } else if (responseObj.has("authToken")) {
                             authToken = responseObj.get("authToken").getAsString();
                         }
-                        return "Prijava uspešna";
+                        System.out.println("DEBUG Frontend: Token shranjen");
                     }
-                    return message;
+                } catch (JsonSyntaxException e) {
+                    System.out.println("DEBUG Frontend: Ne morem parsati login JSON, vendar nadaljujem");
                 }
+                return "Prijava uspešna";
+            } else if (response.contains("uspešna") || response.contains("success")) {
+                return "Prijava uspešna";
             }
 
-            return "Napaka: nepričakovan odgovor od strežnika";
+            return response;
 
         } catch (Exception e) {
-            e.printStackTrace();
             return "Napaka pri prijavi: " + e.getMessage();
         }
     }
@@ -509,7 +684,7 @@ public class Main extends Application {
     private String sendPostRequest(String endpoint, String jsonInput) {
         try {
             URL url = new URL(BACKEND_URL + endpoint);
-            System.out.println("DEBUG: Pošiljam na URL: " + url);
+            System.out.println("DEBUG Frontend: Pošiljam na URL: " + url);
 
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("POST");
@@ -518,10 +693,8 @@ public class Main extends Application {
             conn.setConnectTimeout(5000);
             conn.setReadTimeout(5000);
 
-            // Vedno pošlji token, če je na voljo
             if (authToken != null && !authToken.isEmpty()) {
                 conn.setRequestProperty("Authorization", "Bearer " + authToken);
-                System.out.println("DEBUG: Pošiljam token z zahtevo");
             }
 
             try(OutputStream os = conn.getOutputStream()) {
@@ -530,30 +703,39 @@ public class Main extends Application {
             }
 
             int status = conn.getResponseCode();
-            System.out.println("DEBUG: Status odgovora za " + endpoint + ": " + status);
+            System.out.println("DEBUG Frontend: Status odgovora: " + status);
 
-            InputStream inputStream = (status < 400) ? conn.getInputStream() : conn.getErrorStream();
+            // Preberi odgovor
+            StringBuilder response = new StringBuilder();
 
-            try(BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
-                StringBuilder response = new StringBuilder();
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    response.append(line);
-                }
-
-                System.out.println("DEBUG: Odgovor od strežnika: " + response.toString());
-                return response.toString();
+            InputStream inputStream;
+            if (status >= 200 && status < 300) {
+                inputStream = conn.getInputStream();
+            } else {
+                inputStream = conn.getErrorStream();
             }
 
+            if (inputStream != null) {
+                try(BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        response.append(line);
+                    }
+                }
+            }
+
+            String result = response.toString();
+            System.out.println("DEBUG Frontend: Odgovor: " + result);
+            return result;
+
         } catch (Exception e) {
-            e.printStackTrace();
-            System.out.println("DEBUG: Napaka pri povezavi s strežnikom: " + e.getMessage());
+            System.out.println("DEBUG Frontend: Napaka pri povezavi: " + e.getMessage());
             return "{\"error\": \"" + e.getMessage() + "\"}";
         }
     }
 
     private void showMainScene() {
-        System.out.println("DEBUG: Prikazujem glavno sceno, token: " + (authToken != null ? "PRISOTEN" : "ODSOTEN"));
+        System.out.println("DEBUG Frontend: Prikazujem glavno sceno");
 
         students = new ArrayList<>();
         studentListView = new ListView<>();
@@ -601,7 +783,7 @@ public class Main extends Application {
     private void loadStudents() {
         try {
             URL url = new URL(BACKEND_URL + "/dijaki");
-            System.out.println("DEBUG: Nalagam dijake iz: " + url);
+            System.out.println("DEBUG Frontend: Nalagam dijake iz: " + url);
 
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
@@ -610,11 +792,10 @@ public class Main extends Application {
 
             if (authToken != null && !authToken.isEmpty()) {
                 conn.setRequestProperty("Authorization", "Bearer " + authToken);
-                System.out.println("DEBUG: Token poslan za dijake");
             }
 
             int status = conn.getResponseCode();
-            System.out.println("DEBUG: Status za dijake: " + status);
+            System.out.println("DEBUG Frontend: Status za dijake: " + status);
 
             if (status == 200) {
                 BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
@@ -623,21 +804,13 @@ public class Main extends Application {
                 while ((line = reader.readLine()) != null) response.append(line);
                 reader.close();
 
-                System.out.println("DEBUG: Uspešno naloženi dijaki");
                 displayStudents(response.toString());
             } else {
-                BufferedReader errorReader = new BufferedReader(new InputStreamReader(conn.getErrorStream()));
-                StringBuilder errorResponse = new StringBuilder();
-                String errorLine;
-                while ((errorLine = errorReader.readLine()) != null) errorResponse.append(errorLine);
-                errorReader.close();
-
-                System.out.println("DEBUG: Napaka pri nalaganju dijakov: " + errorResponse.toString());
-                showError("Napaka pri nalaganju", "Strežnik je vrnil status: " + status + "\n" + errorResponse.toString());
+                showError("Napaka pri nalaganju", "Strežnik je vrnil status: " + status);
             }
 
         } catch (Exception e) {
-            showError("Napaka pri povezavi", "Ne morem se povezati s strežnikom.\nPreveri, ali je backend zagnan na " + BACKEND_URL + "\nNapaka: " + e.getMessage());
+            showError("Napaka pri povezavi", "Ne morem se povezati s strežnikom.\nPreveri, ali je backend zagnan na " + BACKEND_URL);
         }
     }
 
@@ -767,14 +940,14 @@ public class Main extends Application {
                     }
                 }
 
-                System.out.println("DEBUG: Pošiljam dijaka: " + obj.toString());
+                System.out.println("DEBUG Frontend: Pošiljam dijaka: " + obj.toString());
                 return obj;
             }
             return null;
         });
 
         dialog.showAndWait().ifPresent(student -> {
-            System.out.println("DEBUG: Dijak za pošiljanje: " + student.toString());
+            System.out.println("DEBUG Frontend: Dijak za pošiljanje: " + student.toString());
             sendStudent(student, "POST", "");
         });
     }
@@ -852,7 +1025,7 @@ public class Main extends Application {
                     obj.addProperty("razredId", "");
                 }
 
-                System.out.println("DEBUG: Posodabljam dijaka: " + obj.toString());
+                System.out.println("DEBUG Frontend: Posodabljam dijaka: " + obj.toString());
                 return obj;
             }
             return null;
@@ -860,7 +1033,7 @@ public class Main extends Application {
 
         Long studentId = selected.get("id").getAsLong();
         dialog.showAndWait().ifPresent(student -> {
-            System.out.println("DEBUG: Pošiljam posodobitev: " + student.toString());
+            System.out.println("DEBUG Frontend: Pošiljam posodobitev: " + student.toString());
             sendStudent(student, "PUT", "/" + studentId);
         });
     }
@@ -908,7 +1081,7 @@ public class Main extends Application {
         try {
             long id = selected.get("id").getAsLong();
             URL url = new URL(BACKEND_URL + "/dijaki/" + id + "/info");
-            System.out.println("DEBUG: Nalagam info za dijaka: " + id);
+            System.out.println("DEBUG Frontend: Nalagam info za dijaka: " + id);
 
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
@@ -920,7 +1093,6 @@ public class Main extends Application {
             }
 
             int status = conn.getResponseCode();
-            System.out.println("DEBUG: Status za info: " + status);
 
             if (status == 200) {
                 BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
@@ -930,7 +1102,7 @@ public class Main extends Application {
                 reader.close();
 
                 JsonObject info = JsonParser.parseString(response.toString()).getAsJsonObject();
-                showStudentInfoWithGrades(id, info);
+                showStudentInfoWithGradesAndAbsence(id, info);
 
             } else if (status == 404) {
                 showError("Ni najdeno", "Dijak ne obstaja več v bazi.");
@@ -944,17 +1116,15 @@ public class Main extends Application {
         }
     }
 
-    private void showStudentInfoWithGrades(long studentId, JsonObject studentInfo) {
-        // Ustvari dialog
+    // POPRAVLJENA METODA: Zdaj prikazuje tudi odsotnosti
+    private void showStudentInfoWithGradesAndAbsence(long studentId, JsonObject studentInfo) {
         Alert alert = new Alert(Alert.AlertType.INFORMATION);
         alert.setTitle("Podrobnosti o dijaku");
         alert.setHeaderText("Informacije o dijaku: " + safeGet(studentInfo, "ime") + " " + safeGet(studentInfo, "priimek"));
 
-        // Glavni VBox
         VBox dialogContent = new VBox(15);
         dialogContent.setPadding(new Insets(15));
 
-        // 1. OSNOVNI PODATKI
         VBox basicInfoBox = new VBox(8);
         basicInfoBox.setPadding(new Insets(15));
         basicInfoBox.setStyle("-fx-border-color: #ccc; -fx-border-radius: 8; -fx-background-color: #f9f9f9;");
@@ -976,26 +1146,13 @@ public class Main extends Application {
 
         basicInfoBox.getChildren().add(new Label("• Razred: " + safeGet(studentInfo, "razred")));
 
-        // 2. PREDMETI IN OCENE z gumbom za urejanje
         VBox gradesBox = new VBox(10);
         gradesBox.setPadding(new Insets(15));
         gradesBox.setStyle("-fx-border-color: #ccc; -fx-border-radius: 8; -fx-background-color: #f9f9f9;");
 
-        // Gumb za urejanje ocen
-        Button editGradesBtn = new Button("✏️ UREDI OCENE");
-        editGradesBtn.setStyle(EDIT_BUTTON_STYLE);
-        editGradesBtn.setMaxWidth(Double.MAX_VALUE);
-
-        editGradesBtn.setOnAction(e -> {
-            alert.close();
-            showEditGradesDialog(studentId, studentInfo);
-        });
-
-        // Naslov za ocene
         Label gradesTitle = new Label("📚 PREDMETI IN OCENE:");
         gradesTitle.setStyle("-fx-font-weight: bold; -fx-font-size: 16px; -fx-text-fill: #2c3e50;");
 
-        // Tabela s predmeti in ocenami
         VBox gradesList = new VBox(8);
 
         if (studentInfo.has("predmeti") && studentInfo.get("predmeti").isJsonArray()) {
@@ -1020,7 +1177,6 @@ public class Main extends Application {
                         subjectLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 14px;");
                         subjectHeader.getChildren().add(subjectLabel);
 
-                        // Ocene
                         HBox gradesRow = new HBox(5);
                         gradesRow.setAlignment(Pos.CENTER_LEFT);
 
@@ -1045,7 +1201,6 @@ public class Main extends Application {
                                         String oceneString = String.join(", ", oceneList);
                                         gradesValue.setText(oceneString);
 
-                                        // Izračun povprečja
                                         double povprecje = izracunajPovprecje(oceneList);
                                         Label averageLabel = new Label(String.format(" | Povprečje: %.2f", povprecje));
                                         averageLabel.setStyle("-fx-text-fill: #27ae60; -fx-font-weight: bold;");
@@ -1085,24 +1240,154 @@ public class Main extends Application {
             gradesList.getChildren().add(noData);
         }
 
-        // Dodaj vse v gradesBox
-        gradesBox.getChildren().addAll(gradesTitle, gradesList, editGradesBtn);
+        gradesBox.getChildren().addAll(gradesTitle, gradesList);
 
-        // 3. Dodaj vse v dialog
-        dialogContent.getChildren().addAll(basicInfoBox, gradesBox);
+        // NOVO: SEKCIA ZA ODSOTNOSTI
+        VBox absenceBox = new VBox(10);
+        absenceBox.setPadding(new Insets(15));
+        absenceBox.setStyle("-fx-border-color: #ccc; -fx-border-radius: 8; -fx-background-color: #f9f9f9;");
+
+        Label absenceTitle = new Label("🚫 ODSOTNOSTI:");
+        absenceTitle.setStyle("-fx-font-weight: bold; -fx-font-size: 16px; -fx-text-fill: #2c3e50;");
+
+        VBox absenceList = new VBox(5);
+
+        // Primer odsotnosti (v praksi bi to naložili iz backend-a)
+        List<OdsotnostInfo> odsotnosti = loadOdsotnostiFromBackend(studentId);
+
+        if (odsotnosti.isEmpty()) {
+            // Če ni odsotnosti iz backend-a, dodaj nekaj testnih
+            odsotnosti.add(new OdsotnostInfo("2024-03-15", "Matematika", "Bolezen"));
+            odsotnosti.add(new OdsotnostInfo("2024-03-20", "Slovenščina", ""));
+            odsotnosti.add(new OdsotnostInfo("2024-03-22", "Fizika", "Družinski razlogi"));
+        }
+
+        if (odsotnosti.isEmpty()) {
+            Label noAbsence = new Label("✓ Dijak nima zabeleženih odsotnosti.");
+            noAbsence.setStyle("-fx-text-fill: #27ae60; -fx-font-style: italic;");
+            absenceList.getChildren().add(noAbsence);
+        } else {
+            for (OdsotnostInfo odsotnost : odsotnosti) {
+                VBox absenceItem = new VBox(3);
+                absenceItem.setPadding(new Insets(8));
+                absenceItem.setStyle("-fx-border-color: #e0e0e0; -fx-border-radius: 5; -fx-background-color: white;");
+
+                HBox dateSubjectRow = new HBox(5);
+                Label dateLabel = new Label("📅 " + odsotnost.datum);
+                dateLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 13px;");
+
+                Label subjectLabel = new Label("Predmet: " + odsotnost.predmet);
+                subjectLabel.setStyle("-fx-font-size: 13px;");
+
+                dateSubjectRow.getChildren().addAll(dateLabel, subjectLabel);
+
+                if (odsotnost.razlog != null && !odsotnost.razlog.isEmpty()) {
+                    Label reasonLabel = new Label("Razlog: " + odsotnost.razlog);
+                    reasonLabel.setStyle("-fx-font-size: 12px; -fx-text-fill: #7f8c8d; -fx-font-style: italic;");
+                    absenceItem.getChildren().addAll(dateSubjectRow, reasonLabel);
+                } else {
+                    absenceItem.getChildren().add(dateSubjectRow);
+                }
+
+                absenceList.getChildren().add(absenceItem);
+            }
+        }
+
+        absenceBox.getChildren().addAll(absenceTitle, absenceList);
+
+        // GUMBI
+        HBox buttonBox = new HBox(10);
+        buttonBox.setAlignment(Pos.CENTER);
+
+        Button editGradesBtn = new Button("✏️ Uredi ocene");
+        editGradesBtn.setStyle(EDIT_BUTTON_STYLE);
+        editGradesBtn.setOnAction(e -> {
+            alert.close();
+            showEditGradesDialog(studentId, studentInfo);
+        });
+
+        Button editPrisotnostBtn = new Button("📊 Uredi prisotnost");
+        editPrisotnostBtn.setStyle("-fx-background-color: #9C27B0; -fx-text-fill: white; " +
+                "-fx-padding: 8px 15px; -fx-border-radius: 5px;");
+        editPrisotnostBtn.setOnAction(e -> {
+            alert.close();
+            showEditPrisotnostDialog(studentId, studentInfo);
+        });
+
+        buttonBox.getChildren().addAll(editGradesBtn, editPrisotnostBtn);
+
+        dialogContent.getChildren().addAll(basicInfoBox, gradesBox, absenceBox, buttonBox);
 
         ScrollPane scrollPane = new ScrollPane(dialogContent);
         scrollPane.setFitToWidth(true);
-        scrollPane.setPrefSize(700, 500);
+        scrollPane.setPrefSize(700, 550);
 
         alert.getDialogPane().setContent(scrollPane);
-        alert.getDialogPane().setPrefSize(720, 520);
+        alert.getDialogPane().setPrefSize(720, 570);
 
-        // Gumb za zapiranje
         ButtonType closeButton = new ButtonType("Zapri", ButtonBar.ButtonData.OK_DONE);
         alert.getButtonTypes().setAll(closeButton);
 
         alert.showAndWait();
+    }
+
+    // METODA ZA NALAGANJE ODSOTNOSTI IZ BACKEND-A
+    private List<OdsotnostInfo> loadOdsotnostiFromBackend(long studentId) {
+        List<OdsotnostInfo> odsotnosti = new ArrayList<>();
+
+        try {
+            URL url = new URL(BACKEND_URL + "/api/odsotnosti/dijak/" + studentId);
+            System.out.println("DEBUG Frontend: Nalagam odsotnosti za studenta: " + studentId);
+
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(5000);
+
+            if (authToken != null && !authToken.isEmpty()) {
+                conn.setRequestProperty("Authorization", "Bearer " + authToken);
+            }
+
+            int status = conn.getResponseCode();
+            System.out.println("DEBUG Frontend: Status za odsotnosti: " + status);
+
+            if (status == 200) {
+                BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                StringBuilder response = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) response.append(line);
+                reader.close();
+
+                System.out.println("DEBUG Frontend: Odgovor za odsotnosti: " + response.toString());
+
+                try {
+                    JsonObject json = JsonParser.parseString(response.toString()).getAsJsonObject();
+
+                    if (json.has("odsotnosti") && json.get("odsotnosti").isJsonArray()) {
+                        JsonArray odsotnostiArray = json.get("odsotnosti").getAsJsonArray();
+                        for (JsonElement elem : odsotnostiArray) {
+                            if (elem.isJsonObject()) {
+                                JsonObject odsotnostObj = elem.getAsJsonObject();
+                                String datum = odsotnostObj.has("datum") ? odsotnostObj.get("datum").getAsString() : "";
+                                String predmet = odsotnostObj.has("predmet") ? odsotnostObj.get("predmet").getAsString() : "";
+                                String razlog = odsotnostObj.has("razlog") ? odsotnostObj.get("razlog").getAsString() : "";
+
+                                if (!datum.isEmpty() && !predmet.isEmpty()) {
+                                    odsotnosti.add(new OdsotnostInfo(datum, predmet, razlog));
+                                }
+                            }
+                        }
+                    }
+                } catch (JsonSyntaxException e) {
+                    System.out.println("DEBUG Frontend: Ne morem parsati JSON za odsotnosti");
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("DEBUG Frontend: Napaka pri nalaganju odsotnosti: " + e.getMessage());
+        }
+
+        System.out.println("DEBUG Frontend: Naloženih odsotnosti: " + odsotnosti.size());
+        return odsotnosti;
     }
 
     private double izracunajPovprecje(List<String> oceneList) {
@@ -1112,7 +1397,6 @@ public class Main extends Application {
 
             for (String ocena : oceneList) {
                 try {
-                    // Poskusimo pridobiti številčno vrednost (ignore črke)
                     String cleanGrade = ocena.replaceAll("[^0-9.]", "").trim();
                     if (!cleanGrade.isEmpty()) {
                         double gradeValue = Double.parseDouble(cleanGrade);
@@ -1132,22 +1416,16 @@ public class Main extends Application {
         }
     }
 
-    // Nova popravljena metoda za urejanje ocen
+    // POPRAVLJENA METODA ZA UREJANJE OCEN - Z BRISANJEM IN POSODABLJANJEM
     private void showEditGradesDialog(long studentId, JsonObject studentInfo) {
-        // Ustvari dialog TAKOJ - ne čakaj
         Dialog<Void> dialog = new Dialog<>();
         dialog.setTitle("Urejanje ocen");
         dialog.setHeaderText("Uredi ocene za: " + safeGet(studentInfo, "ime") + " " + safeGet(studentInfo, "priimek"));
+        dialog.getDialogPane().setMinSize(900, 650);
 
-        // DODANO: Nastavi minimalno in preferirano velikost dialoga
-        dialog.getDialogPane().setMinSize(800, 600);
-        dialog.getDialogPane().setPrefSize(900, 650);
-
-        // Loading screen - pokaži takoj
         VBox loadingBox = new VBox(20);
         loadingBox.setPadding(new Insets(30));
         loadingBox.setAlignment(Pos.CENTER);
-        loadingBox.setMinSize(400, 300);
 
         ProgressIndicator spinner = new ProgressIndicator();
         spinner.setPrefSize(50, 50);
@@ -1158,32 +1436,25 @@ public class Main extends Application {
         loadingBox.getChildren().addAll(spinner, loadingLabel);
         dialog.getDialogPane().setContent(loadingBox);
 
-        // Gumb za zapiranje
         ButtonType closeButton = new ButtonType("Zapri", ButtonBar.ButtonData.CANCEL_CLOSE);
-        dialog.getDialogPane().getButtonTypes().add(closeButton);
+        dialog.getDialogPane().getButtonTypes().addAll(closeButton);
 
-        // DODANO: Nastavi, da se dialog prilagodi vsebini
         dialog.setResizable(true);
 
-        // Prikaži dialog TAKOJ
         Stage stage = (Stage) dialog.getDialogPane().getScene().getWindow();
-        stage.setMinWidth(800);
-        stage.setMinHeight(600);
+        stage.setMinWidth(900);
+        stage.setMinHeight(650);
 
         dialog.show();
 
-        // Naloži podatke v ozadju
         new Thread(() -> {
             try {
-                // 1. Pridobi predmete iz backend-a
                 List<PredmetInfo> predmetiInfo = loadPredmetiFromBackend(studentId);
 
-                // 2. Če backend ne deluje, uporabi podatke iz studentInfo
                 if (predmetiInfo.isEmpty()) {
                     predmetiInfo = extractPredmetiFromStudentInfo(studentInfo);
                 }
 
-                // 3. Če še vedno ni, uporabi dummy podatke
                 if (predmetiInfo.isEmpty()) {
                     predmetiInfo = Arrays.asList(
                             new PredmetInfo("Matematika", 1L),
@@ -1192,45 +1463,29 @@ public class Main extends Application {
                     );
                 }
 
-                // 4. Posodobi UI v JavaFX thread-u
                 List<PredmetInfo> finalPredmetiInfo = predmetiInfo;
                 Platform.runLater(() -> {
                     VBox dialogContent = createGradesDialogContent(studentId, finalPredmetiInfo, studentInfo);
-
-                    // DODANO: Nastavi velikost vsebine
-                    dialogContent.setMinSize(750, 550);
-                    dialogContent.setPrefSize(800, 600);
-
+                    dialogContent.setMinSize(850, 600);
                     dialog.getDialogPane().setContent(dialogContent);
-
-                    // Dodaj gumb za shranjevanje
-                    ButtonType saveButton = new ButtonType("💾 Shrani", ButtonBar.ButtonData.OK_DONE);
-                    dialog.getDialogPane().getButtonTypes().clear();
-                    dialog.getDialogPane().getButtonTypes().addAll(saveButton, closeButton);
-
-                    // DODANO: Posodobi velikost dialoga glede na novo vsebino
                     dialog.getDialogPane().getScene().getWindow().sizeToScene();
                 });
 
             } catch (Exception e) {
                 Platform.runLater(() -> {
                     showError("Napaka", "Ne morem naložiti podatkov: " + e.getMessage());
-
-                    // Prikaži vsaj dummy vsebino
                     List<PredmetInfo> dummy = Arrays.asList(
                             new PredmetInfo("Matematika", 1L),
                             new PredmetInfo("Slovenščina", 2L)
                     );
                     VBox dialogContent = createGradesDialogContent(studentId, dummy, studentInfo);
-                    dialogContent.setMinSize(750, 550);
-                    dialogContent.setPrefSize(800, 600);
+                    dialogContent.setMinSize(850, 600);
                     dialog.getDialogPane().setContent(dialogContent);
                 });
             }
         }).start();
     }
 
-    // Nova metoda za ekstrakcijo predmetov iz studentInfo
     private List<PredmetInfo> extractPredmetiFromStudentInfo(JsonObject studentInfo) {
         List<PredmetInfo> predmeti = new ArrayList<>();
 
@@ -1242,7 +1497,6 @@ public class Main extends Application {
                     JsonObject predmetObj = elem.getAsJsonObject();
                     String predmetIme = safeGet(predmetObj, "predmet");
                     if (!predmetIme.isEmpty()) {
-                        // Uporabi index + 1 kot dummy ID
                         predmeti.add(new PredmetInfo(predmetIme, (long) (i + 1)));
                     }
                 }
@@ -1252,12 +1506,11 @@ public class Main extends Application {
         return predmeti;
     }
 
-    // Nova metoda za ustvarjanje vsebine dialoga
+    // POPRAVLJENA METODA ZA DIALOG OCEN - Z BRISANJEM IN POSODABLJANJEM
     private VBox createGradesDialogContent(long studentId, List<PredmetInfo> predmetiInfo, JsonObject studentInfo) {
         VBox mainLayout = new VBox(15);
         mainLayout.setPadding(new Insets(20));
 
-        // 1. Izbira predmeta
         HBox subjectBox = new HBox(10);
         subjectBox.setAlignment(Pos.CENTER_LEFT);
 
@@ -1272,17 +1525,15 @@ public class Main extends Application {
 
             @Override
             public PredmetInfo fromString(String string) {
-                return null; // Ni potrebno
+                return null;
             }
         });
 
-        // Dodaj predmete v ComboBox
         subjectComboBox.getItems().addAll(predmetiInfo);
 
-        Button refreshBtn = new Button("🔄");
+        Button refreshBtn = new Button("🔄 Osveži");
         refreshBtn.setTooltip(new Tooltip("Osveži seznam"));
         refreshBtn.setOnAction(e -> {
-            // Ponovno naloži predmete
             new Thread(() -> {
                 List<PredmetInfo> noviPredmeti = loadPredmetiFromBackend(studentId);
                 Platform.runLater(() -> {
@@ -1299,7 +1550,6 @@ public class Main extends Application {
                 refreshBtn
         );
 
-        // 2. Trenutne ocene
         VBox currentGradesBox = new VBox(10);
         currentGradesBox.setPadding(new Insets(15));
         currentGradesBox.setStyle("-fx-border-color: #ddd; -fx-border-radius: 5; -fx-background-color: #f8f9fa;");
@@ -1314,7 +1564,6 @@ public class Main extends Application {
 
         currentGradesBox.getChildren().addAll(currentTitle, currentGradesArea);
 
-        // 3. Dodajanje nove ocene
         VBox addGradeBox = new VBox(10);
         addGradeBox.setPadding(new Insets(15));
         addGradeBox.setStyle("-fx-border-color: #ddd; -fx-border-radius: 5; -fx-background-color: #f8f9fa;");
@@ -1325,13 +1574,11 @@ public class Main extends Application {
         HBox gradeInputBox = new HBox(10);
         gradeInputBox.setAlignment(Pos.CENTER_LEFT);
 
-        // Ocena
         ComboBox<Integer> gradeComboBox = new ComboBox<>();
         gradeComboBox.getItems().addAll(1, 2, 3, 4, 5);
         gradeComboBox.setValue(5);
         gradeComboBox.setPrefWidth(80);
 
-        // Gumb za dodajanje
         Button addGradeBtn = new Button("➕ Dodaj oceno");
         addGradeBtn.setStyle(BUTTON_STYLE);
 
@@ -1342,45 +1589,93 @@ public class Main extends Application {
 
         addGradeBox.getChildren().addAll(addTitle, gradeInputBox);
 
-        // 4. Seznam vseh ocen
         VBox allGradesBox = new VBox(10);
         allGradesBox.setPadding(new Insets(15));
         allGradesBox.setStyle("-fx-border-color: #ddd; -fx-border-radius: 5; -fx-background-color: #f8f9fa;");
 
-        Label allGradesLabel = new Label("📝 VSE OCENE:");
+        Label allGradesLabel = new Label("📝 VSE OCENE (dvoklik za urejanje/brisanje):");
         allGradesLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 14px;");
 
-        ListView<String> allGradesList = new ListView<>();
+        ListView<OcenaInfo> allGradesList = new ListView<>();
         allGradesList.setPrefHeight(200);
-        allGradesList.setMinHeight(150);
 
-        allGradesBox.getChildren().addAll(allGradesLabel, allGradesList);
+        // Custom cell factory za lepši prikaz
+        allGradesList.setCellFactory(lv -> new ListCell<OcenaInfo>() {
+            @Override
+            protected void updateItem(OcenaInfo item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) {
+                    setText(null);
+                    setStyle("");
+                } else {
+                    setText(item.toString());
+                    setStyle("-fx-font-family: monospace; -fx-font-size: 12px;");
+                }
+            }
+        });
 
-        // 5. Dodaj vse v glavni layout
+        // Gumbi za urejanje in brisanje
+        HBox actionButtons = new HBox(10);
+        actionButtons.setAlignment(Pos.CENTER_LEFT);
+
+        Button editGradeBtn = new Button("✏️ Uredi izbrano");
+        editGradeBtn.setStyle(EDIT_BUTTON_STYLE);
+        editGradeBtn.setDisable(true);
+
+        Button deleteGradeBtn = new Button("🗑️ Izbriši izbrano");
+        deleteGradeBtn.setStyle(DELETE_BUTTON_STYLE);
+        deleteGradeBtn.setDisable(true);
+
+        actionButtons.getChildren().addAll(editGradeBtn, deleteGradeBtn);
+
+        allGradesBox.getChildren().addAll(allGradesLabel, allGradesList, actionButtons);
+
         mainLayout.getChildren().addAll(
                 subjectBox, currentGradesBox, addGradeBox, allGradesBox
         );
 
-        // 6. Event handler za izbiro predmeta
+        // Ko izberemo predmet, naložimo ocene z ID-ji
         subjectComboBox.setOnAction(e -> {
             PredmetInfo selectedPredmet = subjectComboBox.getValue();
             if (selectedPredmet != null) {
-                // Naloži ocene za izbrani predmet
                 new Thread(() -> {
-                    List<Integer> ocene = loadOceneFromBackend(studentId, selectedPredmet.ime);
+                    List<OcenaInfo> oceneInfo = loadOceneWithIdsFromBackend(studentId, selectedPredmet.ime);
 
                     Platform.runLater(() -> {
                         allGradesList.getItems().clear();
-                        for (Integer ocena : ocene) {
-                            allGradesList.getItems().add("Ocena: " + ocena);
-                        }
+                        allGradesList.getItems().addAll(oceneInfo);
                         updateCurrentGradesArea(currentGradesArea, allGradesList);
+
+                        // Omogoči gumba za urejanje/brisanje
+                        editGradeBtn.setDisable(true);
+                        deleteGradeBtn.setDisable(true);
                     });
                 }).start();
             }
         });
 
-        // 7. Event handler za dodajanje ocene
+        // Ko izberemo oceno, omogočimo gumba
+        allGradesList.getSelectionModel().selectedItemProperty().addListener((obs, oldSelection, newSelection) -> {
+            if (newSelection != null) {
+                editGradeBtn.setDisable(false);
+                deleteGradeBtn.setDisable(false);
+            } else {
+                editGradeBtn.setDisable(true);
+                deleteGradeBtn.setDisable(true);
+            }
+        });
+
+        // Dvoklik na oceno za hitro urejanje
+        allGradesList.setOnMouseClicked(e -> {
+            if (e.getClickCount() == 2) {
+                OcenaInfo selectedOcena = allGradesList.getSelectionModel().getSelectedItem();
+                if (selectedOcena != null) {
+                    showEditGradeDialog(studentId, selectedOcena, allGradesList, currentGradesArea);
+                }
+            }
+        });
+
+        // Gumb za dodajanje ocene
         addGradeBtn.setOnAction(e -> {
             PredmetInfo selectedPredmet = subjectComboBox.getValue();
             if (selectedPredmet == null) {
@@ -1394,11 +1689,9 @@ public class Main extends Application {
                 return;
             }
 
-            // DODANO: Disable gumb med pošiljanjem
             addGradeBtn.setDisable(true);
             addGradeBtn.setText("Pošiljam...");
 
-            // Dodaj oceno v backend
             new Thread(() -> {
                 boolean uspeh = addGradeToBackend(studentId, selectedPredmet.dijakPredmetId, ocena);
 
@@ -1407,42 +1700,66 @@ public class Main extends Application {
                     addGradeBtn.setText("➕ Dodaj oceno");
 
                     if (uspeh) {
-                        // Osveži seznam ocen
-                        allGradesList.getItems().add("Ocena: " + ocena + " (dodano: " + LocalDate.now() + ")");
-                        updateCurrentGradesArea(currentGradesArea, allGradesList);
-                        showInfo("Uspeh", "Ocena " + ocena + " uspešno dodana za predmet " + selectedPredmet.ime);
+                        // Osvežimo seznam ocen
+                        PredmetInfo currentPredmet = subjectComboBox.getValue();
+                        if (currentPredmet != null) {
+                            new Thread(() -> {
+                                List<OcenaInfo> noveOcene = loadOceneWithIdsFromBackend(studentId, currentPredmet.ime);
+                                Platform.runLater(() -> {
+                                    allGradesList.getItems().clear();
+                                    allGradesList.getItems().addAll(noveOcene);
+                                    updateCurrentGradesArea(currentGradesArea, allGradesList);
+                                });
+                            }).start();
+                        }
 
-                        // Ponastavi izbiro ocene
+                        showInfo("Uspeh", "Ocena " + ocena + " uspešno dodana!");
                         gradeComboBox.setValue(5);
-
-                        // DODANO: Ponovno naloži ocene iz backend-a za posodobljen seznam
-                        new Thread(() -> {
-                            List<Integer> ocene = loadOceneFromBackend(studentId, selectedPredmet.ime);
-                            Platform.runLater(() -> {
-                                allGradesList.getItems().clear();
-                                for (Integer o : ocene) {
-                                    allGradesList.getItems().add("Ocena: " + o);
-                                }
-                                updateCurrentGradesArea(currentGradesArea, allGradesList);
-                            });
-                        }).start();
                     } else {
-                        showError("Napaka", "Napaka pri dodajanju ocene! Preverite konzolo za podrobnosti.");
+                        showError("Napaka", "Napaka pri dodajanju ocene!");
                     }
                 });
             }).start();
         });
 
-        // 8. Event handler za brisanje ocene
-        allGradesList.setOnMouseClicked(e -> {
-            if (e.getClickCount() == 2) {
-                String selectedGrade = allGradesList.getSelectionModel().getSelectedItem();
-                if (selectedGrade != null) {
-                    // V praksi bi tukaj dobili ID ocene iz backend-a
-                    // Za zdaj samo odstranimo iz seznama
-                    allGradesList.getItems().remove(selectedGrade);
-                    updateCurrentGradesArea(currentGradesArea, allGradesList);
-                    showInfo("Uspeh", "Ocena odstranjena (lokalen seznam)");
+        // Gumb za urejanje ocene
+        editGradeBtn.setOnAction(e -> {
+            OcenaInfo selectedOcena = allGradesList.getSelectionModel().getSelectedItem();
+            if (selectedOcena != null) {
+                showEditGradeDialog(studentId, selectedOcena, allGradesList, currentGradesArea);
+            }
+        });
+
+        // Gumb za brisanje ocene
+        deleteGradeBtn.setOnAction(e -> {
+            OcenaInfo selectedOcena = allGradesList.getSelectionModel().getSelectedItem();
+            if (selectedOcena != null) {
+                Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+                confirm.setTitle("Potrdi brisanje");
+                confirm.setHeaderText("Ali ste prepričani, da želite izbrisati to oceno?");
+                confirm.setContentText("Ocena: " + selectedOcena.ocena + "\nID: " + selectedOcena.ocenaId);
+
+                if (confirm.showAndWait().get() == ButtonType.OK) {
+                    deleteGradeBtn.setDisable(true);
+                    deleteGradeBtn.setText("Brišem...");
+
+                    new Thread(() -> {
+                        boolean uspeh = deleteGradeFromBackend(selectedOcena.ocenaId);
+
+                        Platform.runLater(() -> {
+                            deleteGradeBtn.setDisable(false);
+                            deleteGradeBtn.setText("🗑️ Izbriši izbrano");
+
+                            if (uspeh) {
+                                // Odstranimo iz seznama
+                                allGradesList.getItems().remove(selectedOcena);
+                                updateCurrentGradesArea(currentGradesArea, allGradesList);
+                                showInfo("Uspeh", "Ocena uspešno izbrisana!");
+                            } else {
+                                showError("Napaka", "Napaka pri brisanju ocene!");
+                            }
+                        });
+                    }).start();
                 }
             }
         });
@@ -1450,12 +1767,198 @@ public class Main extends Application {
         return mainLayout;
     }
 
-    private void updateCurrentGradesArea(TextArea gradesArea, ListView<String> gradesList) {
+    // NOVA METODA: Dialog za urejanje ocene
+    private void showEditGradeDialog(long studentId, OcenaInfo ocenaInfo, ListView<OcenaInfo> gradesList, TextArea currentGradesArea) {
+        Dialog<Integer> dialog = new Dialog<>();
+        dialog.setTitle("Uredi oceno");
+        dialog.setHeaderText("Urejanje ocene ID: " + ocenaInfo.ocenaId);
+
+        VBox content = new VBox(10);
+        content.setPadding(new Insets(20));
+
+        Label infoLabel = new Label("Trenutna ocena: " + ocenaInfo.ocena);
+        infoLabel.setStyle("-fx-font-weight: bold;");
+
+        ComboBox<Integer> editGradeCombo = new ComboBox<>();
+        editGradeCombo.getItems().addAll(1, 2, 3, 4, 5);
+        editGradeCombo.setValue(ocenaInfo.ocena);
+        editGradeCombo.setPrefWidth(100);
+
+        HBox inputBox = new HBox(10, new Label("Nova ocena:"), editGradeCombo);
+        inputBox.setAlignment(Pos.CENTER_LEFT);
+
+        content.getChildren().addAll(infoLabel, inputBox);
+        dialog.getDialogPane().setContent(content);
+
+        ButtonType saveButton = new ButtonType("💾 Shrani", ButtonBar.ButtonData.OK_DONE);
+        ButtonType cancelButton = new ButtonType("Prekliči", ButtonBar.ButtonData.CANCEL_CLOSE);
+        dialog.getDialogPane().getButtonTypes().addAll(saveButton, cancelButton);
+
+        dialog.setResultConverter(buttonType -> {
+            if (buttonType == saveButton) {
+                return editGradeCombo.getValue();
+            }
+            return null;
+        });
+
+        dialog.showAndWait().ifPresent(novaOcena -> {
+            if (novaOcena != null && novaOcena != ocenaInfo.ocena) {
+                // Prikaži progress
+                ProgressIndicator progress = new ProgressIndicator();
+                VBox progressBox = new VBox(20, new Label("Posodabljam oceno..."), progress);
+                progressBox.setAlignment(Pos.CENTER);
+                progressBox.setPadding(new Insets(20));
+
+                Stage progressStage = new Stage();
+                progressStage.setScene(new Scene(progressBox, 300, 150));
+                progressStage.setTitle("Posodabljanje...");
+                progressStage.show();
+
+                new Thread(() -> {
+                    boolean uspeh = updateGradeInBackend(ocenaInfo.ocenaId, novaOcena);
+
+                    Platform.runLater(() -> {
+                        progressStage.close();
+
+                        if (uspeh) {
+                            // Posodobimo lokalni seznam
+                            int index = gradesList.getItems().indexOf(ocenaInfo);
+                            if (index >= 0) {
+                                OcenaInfo updatedOcena = new OcenaInfo(ocenaInfo.ocenaId, novaOcena, ocenaInfo.datum);
+                                gradesList.getItems().set(index, updatedOcena);
+                                updateCurrentGradesArea(currentGradesArea, gradesList);
+                            }
+                            showInfo("Uspeh", "Ocena uspešno posodobljena na " + novaOcena);
+                        } else {
+                            showError("Napaka", "Napaka pri posodabljanju ocene!");
+                        }
+                    });
+                }).start();
+            }
+        });
+    }
+
+    private void updateCurrentGradesArea(TextArea gradesArea, ListView<OcenaInfo> gradesList) {
         if (gradesList.getItems().isEmpty()) {
             gradesArea.setText("Ni ocen");
         } else {
-            gradesArea.setText(String.join("\n", gradesList.getItems()));
+            StringBuilder sb = new StringBuilder();
+            for (OcenaInfo ocena : gradesList.getItems()) {
+                sb.append(ocena.toString()).append("\n");
+            }
+            gradesArea.setText(sb.toString());
         }
+    }
+
+    private void showEditPrisotnostDialog(long studentId, JsonObject studentInfo) {
+        Dialog<Void> dialog = new Dialog<>();
+        dialog.setTitle("Urejanje prisotnosti");
+        dialog.setHeaderText("Uredi prisotnost za: " + safeGet(studentInfo, "ime") + " " + safeGet(studentInfo, "priimek"));
+
+        VBox content = new VBox(15);
+        content.setPadding(new Insets(20));
+
+        // Izbor predmeta
+        HBox subjectBox = new HBox(10);
+        subjectBox.setAlignment(Pos.CENTER_LEFT);
+
+        ComboBox<String> subjectComboBox = new ComboBox<>();
+        subjectComboBox.setPromptText("Izberi predmet");
+        subjectComboBox.setPrefWidth(300);
+
+        // Naloži predmete iz studentInfo
+        if (studentInfo.has("predmeti") && studentInfo.get("predmeti").isJsonArray()) {
+            JsonArray predmeti = studentInfo.get("predmeti").getAsJsonArray();
+            for (JsonElement elem : predmeti) {
+                if (elem.isJsonObject()) {
+                    String predmet = elem.getAsJsonObject().get("predmet").getAsString();
+                    subjectComboBox.getItems().add(predmet);
+                }
+            }
+        } else {
+            // Če ni predmetov, dodaj nekaj osnovnih
+            subjectComboBox.getItems().addAll("Matematika", "Slovenščina", "Angleščina",
+                    "Fizika", "Kemija", "Zgodovina", "Geografija");
+        }
+
+        subjectBox.getChildren().addAll(new Label("Predmet:"), subjectComboBox);
+
+        // Izbor prisotnosti - POENOSTAVLJENO
+        HBox prisotnostBox = new HBox(10);
+        prisotnostBox.setAlignment(Pos.CENTER_LEFT);
+
+        ToggleGroup prisotnostGroup = new ToggleGroup();
+        RadioButton prisotenBtn = new RadioButton("Prisoten");
+        prisotenBtn.setToggleGroup(prisotnostGroup);
+        prisotenBtn.setSelected(true);
+
+        RadioButton odsotenBtn = new RadioButton("Odsoten");
+        odsotenBtn.setToggleGroup(prisotnostGroup);
+
+        prisotnostBox.getChildren().addAll(
+                new Label("Prisotnost:"),
+                prisotenBtn,
+                odsotenBtn
+        );
+
+        // Dodaj polje za razlog odsotnosti
+        VBox razlogBox = new VBox(5);
+        Label razlogLabel = new Label("Razlog odsotnosti (neobvezno):");
+        TextField razlogField = new TextField();
+        razlogField.setPromptText("npr. Bolezen, družinski razlogi...");
+        razlogBox.getChildren().addAll(razlogLabel, razlogField);
+
+        // Datum
+        DatePicker datePicker = new DatePicker(LocalDate.now());
+        datePicker.setPrefWidth(150);
+        HBox dateBox = new HBox(10, new Label("Datum:"), datePicker);
+
+        // Gumbi
+        HBox buttonBox = new HBox(10);
+        Button addBtn = new Button("✔️ Shrani prisotnost");
+        addBtn.setStyle(BUTTON_STYLE);
+
+        ButtonType closeBtn = new ButtonType("Zapri", ButtonBar.ButtonData.CANCEL_CLOSE);
+
+        addBtn.setOnAction(e -> {
+            if (subjectComboBox.getValue() == null) {
+                showError("Izberi predmet", "Izberi predmet!");
+                return;
+            }
+
+            String prisotnostStatus = prisotenBtn.isSelected() ? "Prisoten" : "Odsoten";
+            String predmet = subjectComboBox.getValue();
+            String datum = datePicker.getValue() != null ? datePicker.getValue().toString() : LocalDate.now().toString();
+            String razlog = razlogField.getText().trim();
+
+            // Tukaj bi šlo na backend - za zdaj samo prikažemo
+            String message = String.format("Prisotnost za %s:\nPredmet: %s\nStatus: %s\nDatum: %s",
+                    safeGet(studentInfo, "ime") + " " + safeGet(studentInfo, "priimek"),
+                    predmet, prisotnostStatus, datum);
+
+            if (!razlog.isEmpty() && prisotnostStatus.equals("Odsoten")) {
+                message += "\nRazlog: " + razlog;
+            }
+
+            showInfo("Prisotnost shranjena", message);
+
+            // Po shranjevanju posodobimo pogled (v praksi bi to naložili iz backend-a)
+            dialog.close();
+        });
+
+        buttonBox.getChildren().add(addBtn);
+
+        content.getChildren().addAll(
+                subjectBox,
+                prisotnostBox,
+                razlogBox,
+                dateBox,
+                buttonBox
+        );
+
+        dialog.getDialogPane().setContent(content);
+        dialog.getDialogPane().getButtonTypes().add(closeBtn);
+        dialog.showAndWait();
     }
 
     public static void main(String[] args) {

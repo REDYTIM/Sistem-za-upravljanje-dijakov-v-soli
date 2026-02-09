@@ -4,7 +4,7 @@ import jakarta.persistence.*;
 import java.util.List;
 
 @Entity
-@Table(name = "dijak_predmet")
+@Table(name = "dijak_predmet") // ALI "relationship6" - preveri ime tabele!
 public class DijakPredmet {
 
     @Id
@@ -12,7 +12,7 @@ public class DijakPredmet {
     private Long id;
 
     @ManyToOne
-    @JoinColumn(name = "dijak_id")
+    @JoinColumn(name = "dijak_id") // ALI "dijak_id" - preveri ime stolpca!
     private Dijak dijak;
 
     @ManyToOne

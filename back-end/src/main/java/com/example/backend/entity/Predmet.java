@@ -1,7 +1,6 @@
 package com.example.backend.entity;
 
 import jakarta.persistence.*;
-import java.util.List;
 
 @Entity
 @Table(name = "predmeti")
@@ -11,10 +10,11 @@ public class Predmet {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "ime")
     private String ime;
 
-    @OneToMany(mappedBy = "predmet")
-    private List<DijakPredmet> dijakPredmeti;
+    @Column(name = "kratica")
+    private String kratica;
 
     // Getters & Setters
     public Long getId() { return id; }
@@ -23,6 +23,6 @@ public class Predmet {
     public String getIme() { return ime; }
     public void setIme(String ime) { this.ime = ime; }
 
-    public List<DijakPredmet> getDijakPredmeti() { return dijakPredmeti; }
-    public void setDijakPredmeti(List<DijakPredmet> dijakPredmeti) { this.dijakPredmeti = dijakPredmeti; }
+    public String getKratica() { return kratica; }
+    public void setKratica(String kratica) { this.kratica = kratica; }
 }
