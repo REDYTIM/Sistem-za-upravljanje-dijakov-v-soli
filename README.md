@@ -1,1 +1,2 @@
 # Sistem-za-upravljanje-dijakov-v-oli
+Aplikacija se zažene na način da se prvo zažene backend, ko je popolnoma zagnan se lahko zažene frontend. če se aplikacija zažene in ko se loginamo oz registriramo je možen error read timeout (zaradi internetne povezave).
