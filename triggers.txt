@@ -1,0 +1,104 @@
+-- TRIGGER 1: Preveri, če ima EMSO točno 13 znakov
+CREATE OR REPLACE FUNCTION preveri_dolzino_emso()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Preveri samo če EMSO ni NULL
+    IF NEW.emso IS NOT NULL AND NEW.emso != '' THEN
+        -- Preveri dolžino - EMSO mora imeti TOČNO 13 znakov
+        IF LENGTH(NEW.emso) != 13 THEN
+            RAISE EXCEPTION 'EMSO mora imeti točno 13 znakov. Vnešeno: % znakov', LENGTH(NEW.emso);
+        END IF;
+    ELSE
+        RAISE EXCEPTION 'EMSO je obvezno polje in ne sme biti prazno';
+    END IF;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_preveri_dolzino_emso ON dijaki;
+CREATE TRIGGER trigger_preveri_dolzino_emso
+BEFORE INSERT OR UPDATE ON dijaki
+FOR EACH ROW
+EXECUTE FUNCTION preveri_dolzino_emso();
+
+
+--------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION log_dijak_spremembe()
+RETURNS TRIGGER AS $$
+DECLARE
+    ukaz TEXT;
+    uporabnik TEXT;
+    razred_info TEXT;
+    emso_skrit TEXT;
+BEGIN
+    -- Določi uporabnika (če uporabljaš uporabniške funkcije)
+    uporabnik := COALESCE(current_user, 'sistem');
+    
+    -- Skrij EMSO za varnost (zadnjih 4 številke)
+    IF TG_OP = 'INSERT' THEN
+        emso_skrit := '***' || RIGHT(NEW.emso, 4);
+        razred_info := COALESCE(NEW.razredi_id::TEXT, 'NULL');
+        ukaz := 'INSERT INTO dijaki (ID=' || NEW.id || 
+                ', Ime=' || NEW.ime || 
+                ', Priimek=' || NEW.priimek || 
+                ', Emso=' || emso_skrit ||
+                ', Razred=' || razred_info || 
+                ', Telefonska=' || COALESCE(NEW.telefonska, 'NULL') || 
+                ', DatumRojstva=' || COALESCE(NEW.datum_rojstva::TEXT, 'NULL') || ')';
+                
+    ELSIF TG_OP = 'UPDATE' THEN
+        emso_skrit := '***' || RIGHT(NEW.emso, 4);
+        razred_info := COALESCE(NEW.razredi_id::TEXT, 'NULL');
+        ukaz := 'UPDATE dijak (ID=' || NEW.id || 
+                ', Ime=' || NEW.ime || 
+                ', Priimek=' || NEW.priimek || 
+                ', Emso=' || emso_skrit ||
+                ', Razred=' || razred_info || 
+                ', Telefonska=' || COALESCE(NEW.telefonska, 'NULL') || 
+                ', DatumRojstva=' || COALESCE(NEW.datum_rojstva::TEXT, 'NULL') || ')';
+                
+    ELSIF TG_OP = 'DELETE' THEN
+        emso_skrit := '***' || RIGHT(OLD.emso, 4);
+        razred_info := COALESCE(OLD.razredi_id::TEXT, 'NULL');
+        ukaz := 'DELETE FROM dijaki (ID=' || OLD.id || 
+                ', Ime=' || OLD.ime || 
+                ', Priimek=' || OLD.priimek || 
+                ', Emso=' || emso_skrit ||
+                ', Razred=' || razred_info || 
+                ', Telefonska=' || COALESCE(OLD.telefonska, 'NULL') || 
+                ', DatumRojstva=' || COALESCE(OLD.datum_rojstva::TEXT, 'NULL') || ')';
+    END IF;
+--------------------------------------------------------------------
+-- Funkcija za preverjanje telefonske številke
+CREATE OR REPLACE FUNCTION preveri_telefonsko_st()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Samo če je telefonska nastavljena
+    IF NEW.telefonska IS NOT NULL AND NEW.telefonska != '' THEN
+        -- Preveri dolžino (slovenske mobilne: 8-9 znakov)
+        IF LENGTH(NEW.telefonska) < 8 OR LENGTH(NEW.telefonska) > 12 THEN
+            RAISE EXCEPTION 'Telefonska številka mora imeti 8-12 znakov';
+        END IF;
+        
+        -- Preveri, če se začne z 0 (za slovenske številke)
+        IF NOT NEW.telefonska ~ '^0' THEN
+            RAISE EXCEPTION 'Telefonska številka se mora začeti z 0';
+        END IF;
+        
+        -- Preveri, če vsebuje samo številke in +
+        IF NEW.telefonska !~ '^[0-9\+]+$' THEN
+            RAISE EXCEPTION 'Telefonska številka sme vsebovati samo številke in +';
+        END IF;
+    END IF;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger za preverjanje telefonske
+DROP TRIGGER IF EXISTS trigger_preveri_telefonsko ON dijaki;
+CREATE TRIGGER trigger_preveri_telefonsko
+BEFORE INSERT OR UPDATE ON dijaki
+FOR EACH ROW
+EXECUTE FUNCTION preveri_telefonsko_st();
