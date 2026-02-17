@@ -4,7 +4,7 @@ import jakarta.persistence.*;
 import java.time.LocalDate;
 
 @Entity
-@Table(name = "dijak")
+@Table(name = "dijaki")
 public class Dijak {
 
     @Id
@@ -27,7 +27,7 @@ public class Dijak {
     private String telefonska; // V bazi je Integer, ampak za telefon je bolje String
 
     @ManyToOne
-    @JoinColumn(name = "razred_id")
+    @JoinColumn(name = "razredi_id")
     private Razred razred;
 
     @OneToMany(mappedBy = "dijak", fetch = FetchType.LAZY)

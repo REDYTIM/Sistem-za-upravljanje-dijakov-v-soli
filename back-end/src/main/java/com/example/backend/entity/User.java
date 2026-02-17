@@ -15,14 +15,14 @@ public class User {
 
     private String password;
 
-    private String name;
+
 
     public User() {}
 
     public User(String email, String password, String name) {
         this.email = email;
         this.password = password;
-        this.name = name;
+
     }
 
     // Getterji in setterji
@@ -35,6 +35,5 @@ public class User {
     public String getPassword() { return password; }
     public void setPassword(String password) { this.password = password; }
 
-    public String getName() { return name; }
-    public void setName(String name) { this.name = name; }
+
 }
